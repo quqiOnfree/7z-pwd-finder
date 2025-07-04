@@ -8,7 +8,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 添加LZMA SDK包含路径
 include_directories(
-    lzma_sdk/CPP
     lzma_sdk/C
 )
 

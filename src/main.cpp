@@ -66,45 +66,36 @@ public:
             *size = 0;
             return SZ_OK;
         }
-        if ((uintptr_t)buf == 0xcccccccccccccccc || 
-            (uintptr_t)buf == 0xcdcdcdcdcdcdcdcd ||
-            (uintptr_t)buf == 0xdeadbeef) {
-            // 记录错误信息
-            std::cerr << "Invalid buffer pointer\n";
-            std::cout << "remaining: " << *size << ", file_pos: " << file_pos_ << ", loc_pos: " << loc_pos_ << ", glb_pos: " << glb_pos_ << '\n';
-            return SZ_ERROR_DATA;
-        }
         std::size_t remaining = *size;
         *size = 0;
-        while (remaining) {
-            if (file_pos_ >= files_.size() - 1 && files_sizes_.at(files_sizes_.size() - 1) - 1 <= loc_pos_) {
-                return SZ_OK;
-            }
-            std::cout << "remaining: " << remaining << ", file_pos: " << file_pos_ << ", loc_pos: " << loc_pos_ << ", glb_pos: " << glb_pos_ << '\n';
-            auto& file = files_.at(file_pos_);
-            if (file.eof()) {
-                file.clear();
-            }
-            file.seekg(loc_pos_);
-            char *mem = (char*)g_Alloc.Alloc(&g_Alloc, remaining + 1);
-            std::memset(mem, 0, remaining + 1);
-            file.read(mem, remaining);
-            std::memcpy(buf, mem, remaining);
-            g_Alloc.Free(&g_Alloc, mem);
-            if (files_sizes_.at(file_pos_) < remaining) {
-                remaining -= files_sizes_.at(file_pos_);
-                glb_pos_ += files_sizes_.at(file_pos_);
-                *size += files_sizes_.at(file_pos_);
-                loc_pos_ = 0;
-                ++file_pos_;
-            }
-            else {
-                loc_pos_ += remaining;
-                glb_pos_ += remaining;
-                *size += remaining;
-                remaining = 0;
-                return SZ_OK;
-            }
+        if (file_pos_ >= files_.size() - 1 && files_sizes_.at(files_sizes_.size() - 1) - 1 <= loc_pos_) {
+            return SZ_OK;
+        }
+        auto& file = files_.at(file_pos_);
+        if (file.eof()) {
+            file.clear();
+        }
+        file.seekg(loc_pos_);
+        std::size_t acturally_read = files_sizes_.at(file_pos_) - loc_pos_ < remaining ? files_sizes_.at(file_pos_) - loc_pos_ : remaining;
+        char *mem = (char*)g_Alloc.Alloc(&g_Alloc, acturally_read + 1);
+        std::memset(mem, 0, acturally_read + 1);
+        file.read(mem, acturally_read);
+        std::memcpy(buf, mem, acturally_read);
+        g_Alloc.Free(&g_Alloc, mem);
+        if (acturally_read < remaining) {
+            remaining -= acturally_read;
+            glb_pos_ += acturally_read;
+            *size += acturally_read;
+            loc_pos_ = 0;
+            ++file_pos_;
+            return SZ_OK;
+        }
+        else {
+            loc_pos_ += remaining;
+            glb_pos_ += remaining;
+            *size += remaining;
+            remaining = 0;
+            return SZ_OK;
         }
 
         return SZ_OK;
@@ -192,18 +183,32 @@ SRes Seek(ISeekInStreamPtr s, std::int64_t *pos, ESzSeek origin) {
 int main() {
     ISzAlloc allocImp = g_Alloc;
     ISzAlloc allocTempImp = g_Alloc;
-    LookStreamAdapter adapter{{}, {{"hello.7z"}}};
+    LookStreamAdapter adapter{{}, {{"hello.7z.001", "hello.7z.002", "hello.7z.003"}}};
     adapter.stream.Read = Read;
     adapter.stream.Seek = Seek;
     CLookToRead2 lookStream;
     LookToRead2_CreateVTable(&lookStream, false);
-    lookStream.realStream = &adapter.stream;
+    
+    lookStream.buf = NULL;
+
+    {
+        lookStream.buf = (Byte *)ISzAlloc_Alloc(&allocImp, kInputBufSize);
+        if (!lookStream.buf)
+            return SZ_ERROR_MEM;
+        else
+        {
+            lookStream.bufSize = kInputBufSize;
+            lookStream.realStream = &adapter.stream;
+            LookToRead2_INIT(&lookStream)
+        }
+    }
 
     CrcGenerateTable();
     CSzArEx db;
     SzArEx_Init(&db);
     
+    
     SRes res = SzArEx_Open(&db, &lookStream.vt, &allocImp, &allocTempImp);
-    if (res != SZ_OK) return 1;
-    return 0;
+    if (res != SZ_OK) return res;
+    return SZ_OK;
 }
