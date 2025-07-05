@@ -52,6 +52,11 @@ public:
         ++need_to_be_added;
         need_to_carry = false;
       }
+      if (local_password.size() <= bit) {
+        while (bit - (local_password.size() - 1)) {
+          local_password.push_back(0);
+        }
+      }
       if (local_password[bit] + need_to_be_added < password_set_size_) {
         local_password[bit] += need_to_be_added;
       } else {
@@ -89,8 +94,8 @@ public:
     if (!is_first) {
       is_first = true;
       std::string str(current_lenth_, 0);
-      for (std::size_t iter = 0; iter < current_lenth_; ++iter) {
-        str[iter] = password_set_[current_password_[iter]];
+      for (std::size_t iter = current_lenth_; iter > 0; --iter) {
+        str[current_lenth_ - iter] = password_set_[current_password_[iter - 1]];
       }
       return str;
     }
@@ -100,8 +105,8 @@ public:
     if (current_password_[0] + 1 < password_set_size_) {
       ++current_password_[0];
       std::string str(current_lenth_, 0);
-      for (std::size_t iter = 0; iter < current_lenth_; ++iter) {
-        str[iter] = password_set_[current_password_[iter]];
+      for (std::size_t iter = current_lenth_; iter > 0; --iter) {
+        str[current_lenth_ - iter] = password_set_[current_password_[iter - 1]];
       }
       return str;
     }
@@ -121,14 +126,14 @@ public:
       }
     }
     if (need_to_carry) {
-      current_password.push_back(1);
+      current_password.push_back(0);
       ++current_lenth;
     }
     current_password_ = std::move(current_password);
     current_lenth_ = current_lenth;
     std::string str(current_lenth_, 0);
-    for (std::size_t iter = 0; iter < current_lenth_; ++iter) {
-      str[iter] = password_set_[current_password_[iter]];
+    for (std::size_t iter = current_lenth_; iter > 0; --iter) {
+      str[current_lenth_ - iter] = password_set_[current_password_[iter - 1]];
     }
     return str;
   }
@@ -152,6 +157,12 @@ public:
         ++need_to_be_added;
         need_to_carry = false;
       }
+      if (local_password.size() <= bit) {
+        while (bit - (local_password.size() - 1)) {
+          local_password.push_back(0);
+          ++current_lenth;
+        }
+      }
       if (local_password[bit] + need_to_be_added < password_set_size_) {
         local_password[bit] += need_to_be_added;
       } else {
@@ -174,8 +185,11 @@ public:
       }
     }
     if (need_to_carry) {
-      local_password.push_back(1);
+      local_password.push_back(0);
       ++current_lenth;
+    }
+    if (current_lenth_ != current_lenth) {
+      std::print("{}\n", current_lenth);
     }
     current_lenth_ = current_lenth;
     current_password_ = std::move(local_password);
@@ -187,6 +201,8 @@ public:
   }
 
   std::size_t getCurrentLenth() const { return current_lenth_; }
+
+  std::uint8_t getPasswordMode() const { return password_mode_; }
 
 private:
   void generatePasswordSet() {
