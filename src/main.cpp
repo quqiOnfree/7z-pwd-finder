@@ -60,7 +60,7 @@ private:
         try {
           while (!cracker.found_pwd_ && !lp.isEnd()) {
             std::string pwd = lp.getNextPassword();
-            if (archive.open(stringToWstring(pwd)) == S_OK) {
+            if (archive.open(stringToWstring(pwd)) == S_OK && archive.testExtract(stringToWstring(pwd)) == S_OK) {
               cracker.found_pwd_ = true;
               {
                 std::lock_guard lock(cracker.pwd_mutex_);
