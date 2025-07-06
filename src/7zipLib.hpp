@@ -11,6 +11,7 @@
 #include "../7zip/CPP/7zip/UI/Common/ArchiveExtractCallback.h"
 #include "../7zip/CPP/Common/MyInitGuid.h"
 #include "../7zip/CPP/Common/MyWindows.h"
+#include "../7zip/CPP/Common/UTFConvert.h"
 #include "../7zip/CPP/Windows/DLL.h"
 
 #include "CMultiVolumeInStream.hpp"
@@ -48,13 +49,17 @@ DEFINE_GUID_ARC(CLSID_Format_GZip, kId_GZip)
 DEFINE_GUID_ARC(CLSID_Format_7z, kId_7z)
 
 std::wstring stringToWstring(const std::string &data) {
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  return converter.from_bytes(data);
+  UString ustr;
+  if (!Convert_UTF8_Buf_To_Unicode(data.c_str(), data.size(), ustr)) {
+    throw std::logic_error("Cannot convert the data code");
+  }
+  return {ustr.GetBuf(), ustr.Len()};
 }
 
 std::string wstringToString(const std::wstring &data) {
-  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-  return converter.to_bytes(data);
+  CByteBuffer buffer;
+  Convert_Unicode_To_UTF8_Buf({data.c_str()}, buffer);
+  return {(const char *)buffer.ConstData(), buffer.Size()};
 }
 
 //////////////////////////////////////////////////////////////
@@ -131,7 +136,7 @@ enum class ArchiveType : std::uint8_t { UnknownType = 0, InType, OutType };
 
 enum class CompressType : std::uint8_t {
   UnknownType = 0,
-  ZipType,
+  Zip,
   BZip2,
   Sz,
   Xz,
@@ -139,44 +144,94 @@ enum class CompressType : std::uint8_t {
   GZip
 };
 
-template <ArchiveType AType, CompressType ZType> class SevenZipArchive {
+template <ArchiveType AT, CompressType ZT,
+          class StreamType = CMultiVolumeInStream>
+class SevenZipFile {
 public:
-  SevenZipArchive(SevenZipLibrary &szl) : sevenZipLibrary_(szl) { build(); }
+  SevenZipFile(const std::vector<fs::path> &files,
+               std::pmr::memory_resource *mr = std::pmr::get_default_resource())
+      : stream_(files, mr), file_(&stream_) {}
+
+  SevenZipFile(const SevenZipFile &) = delete;
+  SevenZipFile(SevenZipFile &&szf) = delete;
+  SevenZipFile &operator=(const SevenZipFile &) = delete;
+  SevenZipFile &operator=(SevenZipFile &&) = delete;
+
+  void reset() { file_->Seek(0, STREAM_SEEK_SET, nullptr); }
+
+  CMyComPtr<IInStream> &getStream() { return file_; }
+
+private:
+  StreamType stream_;
+  CMyComPtr<IInStream> file_;
+};
+
+template <ArchiveType AT, CompressType CT, class StreamType>
+class SevenZipArchive {
+public:
+  SevenZipArchive(SevenZipLibrary &szl, SevenZipFile<AT, CT, StreamType> &file)
+      : sevenZipLibrary_(szl), file_(file) {
+    build();
+  }
+
+  SevenZipArchive(const SevenZipArchive &) = delete;
+  SevenZipArchive(SevenZipArchive &&sza) noexcept = delete;
+  SevenZipArchive &operator=(const SevenZipArchive &) = delete;
+  SevenZipArchive &operator=(SevenZipArchive &&sza) noexcept = delete;
 
   ~SevenZipArchive() noexcept = default;
 
   CMyComPtr<IInArchive> &getArchive() { return archive_; }
 
+  HRESULT open(const std::wstring &password) {
+    file_.reset();
+    CArchiveOpenCallback *openCallbackSpec = new CArchiveOpenCallback;
+    CMyComPtr<IArchiveOpenCallback> openCallback(openCallbackSpec);
+    openCallbackSpec->PasswordIsDefined = true;
+    openCallbackSpec->Password = password.c_str();
+    const UInt64 scanSize = 1 << 23;
+    return archive_->Open(file_.getStream(), &scanSize, openCallback);
+  }
+
+  HRESULT open() {
+    file_.reset();
+    CArchiveOpenCallback *openCallbackSpec = new CArchiveOpenCallback;
+    CMyComPtr<IArchiveOpenCallback> openCallback(openCallbackSpec);
+    openCallbackSpec->PasswordIsDefined = false;
+    const UInt64 scanSize = 1 << 23;
+    return archive_->Open(file_.getStream(), &scanSize, openCallback);
+  }
+
 private:
   void build() {
     auto &f_CreateObject = sevenZipLibrary_.getCreateObjectFunc();
-    if constexpr (AType == ArchiveType::InType) {
-      if constexpr (ZType == CompressType::ZipType) {
+    if constexpr (AT == ArchiveType::InType) {
+      if constexpr (CT == CompressType::Zip) {
         if (f_CreateObject(&CLSID_Format_Zip, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::BZip2) {
+      } else if constexpr (CT == CompressType::BZip2) {
         if (f_CreateObject(&CLSID_Format_BZip2, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Sz) {
+      } else if constexpr (CT == CompressType::Sz) {
         if (f_CreateObject(&CLSID_Format_7z, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Xz) {
+      } else if constexpr (CT == CompressType::Xz) {
         if (f_CreateObject(&CLSID_Format_Xz, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Tar) {
+      } else if constexpr (CT == CompressType::Tar) {
         if (f_CreateObject(&CLSID_Format_Tar, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::GZip) {
+      } else if constexpr (CT == CompressType::GZip) {
         if (f_CreateObject(&CLSID_Format_GZip, &IID_IInArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
@@ -184,33 +239,33 @@ private:
       } else {
         throw std::logic_error("Invalid compress type");
       }
-    } else if constexpr (AType == ArchiveType::OutType) {
-      if constexpr (ZType == CompressType::ZipType) {
+    } else if constexpr (AT == ArchiveType::OutType) {
+      if constexpr (CT == CompressType::Zip) {
         if (f_CreateObject(&CLSID_Format_Zip, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::BZip2) {
+      } else if constexpr (CT == CompressType::BZip2) {
         if (f_CreateObject(&CLSID_Format_BZip2, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Sz) {
+      } else if constexpr (CT == CompressType::Sz) {
         if (f_CreateObject(&CLSID_Format_7z, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Xz) {
+      } else if constexpr (CT == CompressType::Xz) {
         if (f_CreateObject(&CLSID_Format_Xz, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::Tar) {
+      } else if constexpr (CT == CompressType::Tar) {
         if (f_CreateObject(&CLSID_Format_Tar, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
         }
-      } else if constexpr (ZType == CompressType::GZip) {
+      } else if constexpr (CT == CompressType::GZip) {
         if (f_CreateObject(&CLSID_Format_GZip, &IID_IOutArchive,
                            (void **)&archive_) != S_OK) {
           throw std::runtime_error("Cannot get class object");
@@ -225,42 +280,5 @@ private:
 
   CMyComPtr<IInArchive> archive_;
   SevenZipLibrary &sevenZipLibrary_;
-};
-
-template <ArchiveType AT, CompressType ZT,
-          class StringType = CMultiVolumeMemoryInStream>
-class SevenZipFile {
-public:
-  SevenZipFile(SevenZipArchive<AT, ZT> &archive,
-               const std::vector<fs::path> &files,
-               std::pmr::memory_resource *mr = std::pmr::get_default_resource())
-      : archive_(archive), stream_(files, mr) {
-    file_ = &stream_;
-  }
-
-  HRESULT open(const std::wstring &password) {
-    CArchiveOpenCallback *openCallbackSpec = new CArchiveOpenCallback;
-    CMyComPtr<IArchiveOpenCallback> openCallback(openCallbackSpec);
-    openCallbackSpec->PasswordIsDefined = true;
-    openCallbackSpec->Password = password.c_str();
-    const UInt64 scanSize = 1 << 23;
-    return archive_.getArchive()->Open(file_, &scanSize, openCallback);
-  }
-
-  HRESULT open() {
-    CArchiveOpenCallback *openCallbackSpec = new CArchiveOpenCallback;
-    CMyComPtr<IArchiveOpenCallback> openCallback(openCallbackSpec);
-    openCallbackSpec->PasswordIsDefined = false;
-    const UInt64 scanSize = 1 << 23;
-    return archive_.getArchive()->Open(file_, &scanSize, openCallback);
-  }
-
-  void reset() { stream_.Seek(0, STREAM_SEEK_SET, nullptr); }
-
-  StringType &get_stream() { return stream_; }
-
-private:
-  SevenZipArchive<AT, ZT> &archive_;
-  StringType stream_;
-  CMyComPtr<IInStream> file_;
+  SevenZipFile<AT, CT, StreamType> &file_;
 };

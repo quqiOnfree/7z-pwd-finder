@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -45,9 +46,9 @@ public:
   }
 
   CMultiVolumeInStream(const CMultiVolumeInStream &) = delete;
-  CMultiVolumeInStream(CMultiVolumeInStream &&) noexcept = default;
+  CMultiVolumeInStream(CMultiVolumeInStream &&) noexcept = delete;
   CMultiVolumeInStream &operator=(const CMultiVolumeInStream &) = delete;
-  CMultiVolumeInStream &operator=(CMultiVolumeInStream &&) = default;
+  CMultiVolumeInStream &operator=(CMultiVolumeInStream &&) = delete;
 
   virtual ~CMultiVolumeInStream() noexcept = default;
 
@@ -168,7 +169,7 @@ public:
   }
 
 private:
-  ULONG ref_count_;
+  std::atomic<ULONG> ref_count_;
   std::pmr::memory_resource *memory_resource_;
 
   std::vector<std::ifstream> files_;
@@ -217,11 +218,10 @@ public:
   }
 
   CMultiVolumeMemoryInStream(const CMultiVolumeMemoryInStream &) = delete;
-  CMultiVolumeMemoryInStream(CMultiVolumeMemoryInStream &&) noexcept = default;
+  CMultiVolumeMemoryInStream(CMultiVolumeMemoryInStream &&) noexcept = delete;
   CMultiVolumeMemoryInStream &
   operator=(const CMultiVolumeMemoryInStream &) = delete;
-  CMultiVolumeMemoryInStream &
-  operator=(CMultiVolumeMemoryInStream &&) = default;
+  CMultiVolumeMemoryInStream &operator=(CMultiVolumeMemoryInStream &&) = delete;
 
   ~CMultiVolumeMemoryInStream() noexcept = default;
 
@@ -286,7 +286,7 @@ public:
   }
 
 private:
-  ULONG ref_count_;
+  std::atomic<ULONG> ref_count_;
   std::pmr::memory_resource *memory_resource_;
 
   std::pmr::string buffer_;

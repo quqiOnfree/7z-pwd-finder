@@ -6,3 +6,4 @@ _o/
 *.mak
 makefile
 makefile.gcc
+*.7z.*
